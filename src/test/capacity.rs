@@ -23,7 +23,7 @@ pub fn run_capacity_test<F>(
 where
     F: Fn(f64, &str, f64) + Send,
 {
-    let test_dir = PathBuf::from(mount_point).join("_udisk_test_");
+    let test_dir = PathBuf::from(mount_point).join("_ubench_capacity_");
     fs::create_dir_all(&test_dir).map_err(|e| format!("Cannot create test dir: {}", e))?;
 
     // Calculate how many blocks we can write based on free space

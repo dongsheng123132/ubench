@@ -9,7 +9,7 @@ pub const ALIGN_SIZE: usize = 4096;
 /// Uses file-based approach with sync to bypass write cache as much as possible.
 pub fn write_block(path: &Path, offset: u64, data: &[u8]) -> Result<(), String> {
     let block_index = offset / BLOCK_SIZE as u64;
-    let file_path = path.join(format!("_udisk_test_block_{:06}.dat", block_index));
+    let file_path = path.join(format!("_ubench_block_{:06}.dat", block_index));
 
     let mut file =
         fs::File::create(&file_path).map_err(|e| format!("Failed to create block file: {}", e))?;
@@ -26,7 +26,7 @@ pub fn write_block(path: &Path, offset: u64, data: &[u8]) -> Result<(), String> 
 /// Drops and reopens the file handle to avoid OS read cache.
 pub fn read_block(path: &Path, offset: u64, size: usize) -> Result<Vec<u8>, String> {
     let block_index = offset / BLOCK_SIZE as u64;
-    let file_path = path.join(format!("_udisk_test_block_{:06}.dat", block_index));
+    let file_path = path.join(format!("_ubench_block_{:06}.dat", block_index));
 
     // Open fresh handle to bypass read cache
     let mut file =

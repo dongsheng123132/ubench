@@ -34,7 +34,7 @@ pub fn run_speed_test<F>(
 where
     F: Fn(f64, &str, f64) + Send,
 {
-    let test_file = PathBuf::from(mount_point).join("_udisk_speed_test_.dat");
+    let test_file = PathBuf::from(mount_point).join("_ubench_speed_.dat");
 
     // Check free space and cap test size accordingly
     let free_space = super::capacity::fs_free_space(mount_point).unwrap_or(0);

@@ -30,7 +30,7 @@ pub fn run_thermal_test<F>(
 where
     F: Fn(f64, &str, f64) + Send,
 {
-    let test_file = PathBuf::from(mount_point).join("_udisk_thermal_test_.dat");
+    let test_file = PathBuf::from(mount_point).join("_ubench_thermal_.dat");
     let mut rng = PseudoRandom::new(0x7748524D414C);
     let mut chunk_data = vec![0u8; CHUNK_SIZE];
     rng.fill_buffer(&mut chunk_data);

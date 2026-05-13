@@ -322,6 +322,59 @@ fn list_usb_drives_wmic_fallback() -> Result<Vec<DriveInfo>, String> {
         }
     }
 
+    // Some USB drives report as DriveType=3 (Fixed) instead of 2 (Removable).
+    // Use PowerShell to find USB-bus disks that were missed by wmic drivetype=2.
+    let existing_paths: Vec<String> = drives.iter().map(|d| d.path.clone()).collect();
+    if let Ok(ps_output) = Command::new("powershell")
+        .args([
+            "-NoProfile", "-Command",
+            "Get-Disk | Where-Object BusType -eq 'USB' | ForEach-Object { \
+                $disk = $_; \
+                Get-Partition -DiskNumber $disk.Number -ErrorAction SilentlyContinue | \
+                Where-Object { $_.DriveLetter } | ForEach-Object { \
+                    $vol = Get-Volume -DriveLetter $_.DriveLetter -ErrorAction SilentlyContinue; \
+                    if ($vol) { \
+                        '{0}|{1}|{2}|{3}|{4}|{5}' -f $_.DriveLetter, $disk.FriendlyName, \
+                        $vol.FileSystem, $vol.Size, $vol.SizeRemaining, $vol.FileSystemLabel \
+                    } \
+                } \
+            }",
+        ])
+        .output()
+    {
+        let ps_str = String::from_utf8_lossy(&ps_output.stdout);
+        for line in ps_str.lines() {
+            let line = line.trim();
+            if line.is_empty() { continue; }
+            let parts: Vec<&str> = line.split('|').collect();
+            if parts.len() < 6 { continue; }
+            let letter = parts[0].trim();
+            let path = format!("{}:", letter);
+            if existing_paths.contains(&path) { continue; }
+            let friendly = parts[1].trim();
+            let fs = parts[2].trim();
+            let size: u64 = parts[3].trim().parse().unwrap_or(0);
+            let free: u64 = parts[4].trim().parse().unwrap_or(0);
+            let label = parts[5].trim();
+            if size == 0 { continue; }
+            let name = if !label.is_empty() {
+                label.to_string()
+            } else {
+                friendly.to_string()
+            };
+            drives.push(DriveInfo {
+                name,
+                path,
+                mount_point: format!("{}:\\", letter),
+                serial: String::new(),
+                capacity_bytes: size,
+                free_bytes: free,
+                file_system: fs.to_string(),
+                is_removable: true,
+            });
+        }
+    }
+
     Ok(drives)
 }
 

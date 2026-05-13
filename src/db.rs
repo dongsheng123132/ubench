@@ -17,7 +17,7 @@ pub struct Database {
 
 impl Database {
     pub fn new() -> Result<Self, DbError> {
-        Self::open("udisk_reports.db")
+        Self::open("ubench_reports.db")
     }
 
     pub fn open(path: &str) -> Result<Self, DbError> {

@@ -1,5 +1,5 @@
 use std::sync::atomic::Ordering;
-use udisk_inspector_lib::cli;
+use ubench_lib::cli;
 
 #[tokio::main]
 async fn main() {
@@ -7,7 +7,7 @@ async fn main() {
 
     ctrlc::set_handler(move || {
         eprintln!("\nStopping test...");
-        udisk_inspector_lib::STOP_FLAG.store(true, Ordering::Relaxed);
+        ubench_lib::STOP_FLAG.store(true, Ordering::Relaxed);
     })
     .ok();
 

@@ -1,5 +1,7 @@
+pub mod bench;
 pub mod cli;
 pub mod db;
+pub mod direct_io;
 pub mod disk;
 pub mod report;
 pub mod test;

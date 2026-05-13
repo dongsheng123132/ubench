@@ -1,15 +1,19 @@
 [package]
-name = "udisk-inspector"
-version = "0.2.0"
-description = "U盘质量检测 CLI 工具"
-authors = ["you"]
+name = "ubench"
+version = "1.0.0-alpha.1"
+description = "UBench - Industry-standard USB flash drive benchmark with honest direct-IO measurement"
+authors = ["dongsheng123132"]
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/dongsheng123132/ubench"
+homepage = "https://github.com/dongsheng123132/ubench"
+readme = "README.md"
 
 [lib]
-name = "udisk_inspector_lib"
+name = "ubench_lib"
 
 [[bin]]
-name = "udisk-inspector"
+name = "ubench"
 path = "src/main.rs"
 
 [dependencies]
@@ -26,12 +30,15 @@ env_logger = "0.11"
 indicatif = "0.17"
 comfy-table = "7"
 ctrlc = "3"
+sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
   "Win32_Storage_FileSystem",
   "Win32_System_IO",
+  "Win32_System_Memory",
   "Win32_Foundation",
   "Win32_System_Ioctl",
+  "Win32_Security",
 ] }
 wmi = "0.14"

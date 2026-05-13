@@ -11,14 +11,14 @@ use output::{print_error, print_success, OutputMode};
 use std::sync::atomic::Ordering;
 
 #[derive(Parser)]
-#[command(name = "udisk-inspector", version, about = "U盘质量检测 CLI 工具")]
+#[command(name = "ubench", version, about = "UBench - 行业标准 U盘跑分工具 (绕过缓存的真实速度测量)")]
 pub struct Cli {
     /// 以 JSON 格式输出（适合 AI/脚本调用）
     #[arg(long, global = true)]
     json: bool,
 
     /// 数据库路径
-    #[arg(long, global = true, default_value = "udisk_reports.db")]
+    #[arg(long, global = true, default_value = "ubench_reports.db")]
     db: String,
 
     /// 详细日志
@@ -71,6 +71,20 @@ enum Commands {
     Report {
         #[command(subcommand)]
         action: ReportAction,
+    },
+    /// 跑分 (UBench v1.0 行业标准 — 绕过 OS 缓存的诚实测速)
+    Bench {
+        /// 挂载点（如 E:\, F:\, X:\, /Volumes/USB）
+        mount: String,
+        /// 快速模式 (~1 分钟,4 项核心测试)
+        #[arg(long)]
+        quick: bool,
+        /// 完整模式 (~10 分钟,6 项含 SLC 缓存衰减 + 冷启动)
+        #[arg(long)]
+        full: bool,
+        /// 输出 JSON 报告文件路径 (含签名,可上传至 udiskbench.org)
+        #[arg(long)]
+        out: Option<String>,
     },
 }
 
@@ -140,6 +154,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             ReportAction::Export { id, html } => cmd_report_export(mode, &cli.db, &id, &html),
             ReportAction::Delete { id } => cmd_report_delete(mode, &cli.db, &id),
         },
+        Commands::Bench { mount, quick, full, out } => {
+            let profile = match (quick, full) {
+                (true, false) => crate::bench::BenchProfile::Quick,
+                (false, true) => crate::bench::BenchProfile::Full,
+                (false, false) => crate::bench::BenchProfile::Quick, // default
+                (true, true) => return Err("不能同时指定 --quick 和 --full".into()),
+            };
+            cmd_bench(mode, &mount, profile, out.as_deref()).await
+        }
     }
 }
 
@@ -707,3 +730,206 @@ fn eprint_progress(pb: &Option<ProgressBar>, progress: f64, msg: &str) {
         }
     }
 }
+
+// ============================================================================
+// UBench v1.0 — industry-standard benchmark command
+// ============================================================================
+
+async fn cmd_bench(
+    mode: OutputMode,
+    mount: &str,
+    profile: crate::bench::BenchProfile,
+    out_path: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::bench;
+
+    // Sanity check the mount point exists and is writable
+    let mount_path = std::path::PathBuf::from(mount);
+    if !mount_path.exists() {
+        return Err(format!("挂载点不存在: {}", mount).into());
+    }
+
+    if mode == OutputMode::Human {
+        println!();
+        println!("╔══════════════════════════════════════════════════════════════╗");
+        println!("║  UBench v{} — 行业标准 U盘跑分                       ║", env!("CARGO_PKG_VERSION"));
+        println!("║  绕过 OS 缓存的真实速度测量 (Direct I/O)                       ║");
+        println!("╚══════════════════════════════════════════════════════════════╝");
+        println!();
+        println!("  目标盘     : {}", mount);
+        println!("  测试模式   : {} ({})", profile.as_str().to_uppercase(),
+            if profile == bench::BenchProfile::Quick { "~1 分钟,4 项" } else { "~10 分钟,6 项" });
+        println!("  测试项数   : {}", profile.tests().len());
+        println!();
+    }
+
+    // Run the benchmark in a blocking task
+    let mount_owned = mount.to_string();
+    let pb = if mode == OutputMode::Human {
+        let pb = ProgressBar::new(100);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("  [{elapsed_precise}] {bar:40.cyan/blue} {pos:>3}% {msg}")
+                .unwrap()
+                .progress_chars("█▓░"),
+        );
+        Some(pb)
+    } else {
+        None
+    };
+    let pb_clone = pb.clone();
+
+    let outcome = tokio::task::spawn_blocking(move || {
+        bench::run_bench(&mount_owned, profile, |p, msg| {
+            if let Some(pb) = &pb_clone {
+                pb.set_position((p * 100.0) as u64);
+                pb.set_message(msg.to_string());
+            }
+        })
+    })
+    .await??;
+
+    if let Some(pb) = &pb {
+        pb.finish_and_clear();
+    }
+
+    // Build the report
+    let score = bench::score_report(&outcome);
+
+    // Best-effort drive info
+    let drive_info = collect_drive_info(mount);
+    let interface_info = collect_interface_info(mount);
+    let host_info = collect_host_info();
+
+    let report = bench::BenchReport::build(outcome, score, host_info, drive_info, interface_info);
+
+    // Output: human or JSON
+    if mode == OutputMode::Json {
+        println!("{}", serde_json::to_string(&report)?);
+    } else {
+        print_bench_human(&report);
+    }
+
+    // Save to file if requested
+    if let Some(path) = out_path {
+        std::fs::write(path, serde_json::to_string_pretty(&report)?)?;
+        if mode == OutputMode::Human {
+            println!();
+            println!("  💾 报告已保存: {}", path);
+            println!("     (含 SHA256 签名,任何人可验证)");
+        }
+    }
+
+    Ok(())
+}
+
+fn collect_host_info() -> crate::bench::report::HostInfo {
+    crate::bench::report::HostInfo {
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        hostname: hostname_best_effort(),
+    }
+}
+
+fn hostname_best_effort() -> String {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
+fn collect_drive_info(mount: &str) -> crate::bench::report::DriveInfo {
+    // Try to find from list_usb_drives, fall back to defaults
+    let drives = detect::list_usb_drives().unwrap_or_default();
+    let mount_norm = normalize_mount(mount);
+    let found = drives.iter().find(|d| normalize_mount(&d.mount_point) == mount_norm);
+    if let Some(d) = found {
+        crate::bench::report::DriveInfo {
+            mount_point: d.mount_point.clone(),
+            label: d.name.clone(),
+            file_system: d.file_system.clone(),
+            claimed_capacity_bytes: d.capacity_bytes,
+        }
+    } else {
+        crate::bench::report::DriveInfo {
+            mount_point: mount.to_string(),
+            label: String::new(),
+            file_system: String::new(),
+            claimed_capacity_bytes: 0,
+        }
+    }
+}
+
+fn normalize_mount(s: &str) -> String {
+    s.trim_end_matches(['\\', '/'])
+        .to_uppercase()
+}
+
+fn collect_interface_info(_mount: &str) -> crate::bench::report::InterfaceInfo {
+    // TODO: detect actual USB version via WMI/ioctl. For v1.0-alpha, leave best-effort.
+    crate::bench::report::InterfaceInfo {
+        bus_type: "Unknown".to_string(),
+        usb_version: None,
+        link_speed_mbps: None,
+    }
+}
+
+fn print_bench_human(report: &crate::bench::BenchReport) {
+    println!();
+    println!("┌─ 盘信息 ─────────────────────────────────────────────────────");
+    println!("│  挂载点: {}", report.drive.mount_point);
+    if !report.drive.label.is_empty() {
+        println!("│  标签  : {}", report.drive.label);
+    }
+    if report.drive.claimed_capacity_bytes > 0 {
+        println!("│  容量  : {:.1} GiB", report.drive.claimed_capacity_bytes as f64 / (1024.0 * 1024.0 * 1024.0));
+    }
+    if !report.drive.file_system.is_empty() {
+        println!("│  文件系统: {}", report.drive.file_system);
+    }
+    println!("│  接口  : {} {}", report.interface.bus_type,
+        report.interface.usb_version.as_deref().unwrap_or(""));
+    println!("└──────────────────────────────────────────────────────────────");
+    println!();
+    println!("┌─ 测试结果 ───────────────────────────────────────────────────");
+    let mut table = comfy_table::Table::new();
+    table.load_preset(comfy_table::presets::UTF8_FULL);
+    table.set_header(vec!["测试项", "中位数", "最小", "最大", "稳定性"]);
+    for m in &report.outcome.measurements {
+        let cv_str = if m.cv == 0.0 {
+            "-".to_string()
+        } else {
+            format!("{:.1}%", m.cv * 100.0)
+        };
+        table.add_row(vec![
+            m.label.clone(),
+            format!("{:.1} {}", m.median, m.unit),
+            format!("{:.1}", m.min),
+            format!("{:.1}", m.max),
+            cv_str,
+        ]);
+    }
+    println!("{}", table);
+    println!();
+    println!("┌─ UBench Score ───────────────────────────────────────────────");
+    let mut t2 = comfy_table::Table::new();
+    t2.load_preset(comfy_table::presets::UTF8_FULL);
+    t2.set_header(vec!["项目", "测得", "目标(满分)", "权重", "得分"]);
+    for s in &report.score.sub_scores {
+        t2.add_row(vec![
+            s.label.clone(),
+            format!("{:.1} {}", s.measured, s.unit),
+            format!("{:.0} {}", s.target, s.unit),
+            format!("{:.0}%", s.weight_pct),
+            format!("{}/100", s.score),
+        ]);
+    }
+    println!("{}", t2);
+    println!();
+    println!("  ▶▶  UBench Score (UBS): {} / 100", report.score.ubs);
+    println!("  ▶▶  Grade            : {}", report.score.grade.label());
+    println!();
+    println!("  签名: sha256:{}", &report.signature[..32]);
+    println!("  规则版本: {}", report.formula_version);
+    println!();
+}
+
