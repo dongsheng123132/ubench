@@ -1,11 +1,15 @@
-# UBench
+# UBench — USB Flash Drive & Portable SSD Benchmark
 
-**The industry standard for honest USB flash drive benchmarking.**
-**全球首个绕过 OS 缓存、能识别假盘的 U 盘跑分行业标准。**
+**The industry standard for honest USB benchmarking with Direct I/O. Bypasses OS cache to give you the real flash speed — not RAM speed.**
+
+**全球首个绕过 OS 缓存的 U 盘 / 移动固态硬盘跑分行业标准。识别扩容假盘、测量真实速度、对标 CrystalDiskMark / AS SSD Benchmark。**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Spec](https://img.shields.io/badge/spec-UBench--v1.0-green)](SPEC.md)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)]()
+[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange)](https://www.rust-lang.org/)
+
+> **Keywords**: USB benchmark · USB speed test · CrystalDiskMark alternative · AS SSD Benchmark · fake USB detection · portable SSD test · 4K random IOPS · Direct I/O · NO_BUFFERING · U盘跑分 · U盘测速 · 假U盘检测 · 扩容盘识别 · 移动固态测试 · 行业标准
 
 ---
 
@@ -179,3 +183,58 @@ The spec ([SPEC.md](SPEC.md)) is the source of truth. If a measurement disagrees
 - Microsoft **DiskSpd** team — for proving direct I/O is the right way
 - **CrystalDiskMark** — for popularizing benchmarking; UBench started by reading its source
 - The **U-Claw** project — the workload that made it obvious how broken existing benchmarks are
+
+---
+
+## FAQ / 常见问题
+
+### How do I detect a fake-capacity USB drive? / 怎么检测扩容假U盘？
+Run `ubench test E:\ --capacity` for a full write-verify scan across the drive. Any block that reads back with the wrong identifier proves capacity is fake. 跑容量验证命令,如果回读数据有错位就是扩容假盘。
+
+### Why does my USB drive show 5000+ MB/s in CrystalDiskMark but only 400 MB/s in UBench? / 为什么 CrystalDiskMark 测出 5000+ MB/s 但 UBench 只有 400 MB/s?
+Because CrystalDiskMark's default settings can hit the OS file cache (RAM) instead of the actual flash chip. UBench uses `FILE_FLAG_NO_BUFFERING` to bypass cache entirely. The UBench number is the truth. 因为传统跑分软件读到了 OS 缓存(内存速度),UBench 强制绕过缓存只测真实闪存。
+
+### Can UBench numbers be compared to AS SSD Benchmark? / UBench 的数字能跟 AS SSD 截图对比吗?
+Yes — run `ubench bench E:\ --asssd` for the 6-test AS SSD compatibility profile. Direct comparison with merchant screenshots. 用 `--asssd` 模式可以直接对比 AS SSD 截图。
+
+### What's a good UBench Score for a USB drive? / U盘 UBench 得分多少才算好?
+- 85+ : Premium tier (SanDisk Extreme Pro, Samsung Bar Plus level)
+- 70-84 : Good daily driver
+- 50-69 : Document storage only
+- 25-49 : Painful for many small files (e.g. running U-Claw)
+- 0-24 : Likely fake or defective
+
+### Is UBench faster than CrystalDiskMark? / UBench 比 CrystalDiskMark 快吗?
+UBench `--quick` mode: ~1 minute. AS SSD compat: ~3 minutes. Full: ~10 minutes. CrystalDiskMark default 5×1GB: ~3-5 minutes. Similar.
+
+### What workloads does UBench measure? / UBench 测什么场景?
+- **Sequential 1MB**: large file transfer (movies, ISOs)
+- **Random 4K Q1T1**: small files (U-Claw boot, photo browsing, Git operations)
+- **Random 4K-64Thrd**: heavy parallel load (virtual machines, video editing)
+- **Sustained 60s write**: SLC cache exhaustion (catches drives that look fast for 5 sec then collapse)
+- **U-Claw small files**: real workload of opening N small files in sequence
+
+### Does UBench support portable SSDs / M.2 NVMe? / 支持移动固态/NVMe 吗?
+Yes. UBench classifies the device automatically (USB flash / portable SSD / NVMe / SATA SSD / HDD) and uses the *same* scoring formula across all of them — so a USB stick scoring 86 means absolute performance similar to an NVMe scoring 86. The classification is shown in the report only as a label.
+
+### How does UBench compare to CrystalDiskMark / AS SSD / ATTO? / 跟 CDM / AS SSD / ATTO 比?
+See the [comparison table above](#what-makes-ubench-different). Key differences: only UBench bypasses OS cache by default, detects fake capacity, tests SLC cache exhaustion, and produces signed reports.
+
+### Does UBench work on macOS? / 支持 Mac 吗?
+Yes — uses `F_NOCACHE` fcntl on macOS for direct I/O. Build with `cargo build --release`.
+
+### Where can I see scores for popular USB drives? / 在哪看流行 U 盘的得分?
+`udiskbench.org` scoreboard is in development. Until then, submit your JSON report via GitHub Issues using the [drive-result template](https://github.com/dongsheng123132/ubench/issues/new).
+
+---
+
+## Related Projects / 相关项目
+
+- [Microsoft DiskSpd](https://github.com/microsoft/diskspd) — the gold-standard low-level disk benchmark for Windows
+- [CrystalDiskMark](https://crystalmark.info/en/software/crystaldiskmark/) — popular GUI front-end for DiskSpd
+- [fio](https://github.com/axboe/fio) — Linux/Unix flexible I/O tester
+- [AS SSD Benchmark](https://www.alex-is.de/PHP/fusion/downloads.php?cat_id=4) — SSD-focused benchmark popular in Chinese market
+
+## Search Terms
+
+`USB benchmark` · `USB speed test` · `USB IOPS test` · `4K random read test` · `fake USB detection` · `portable SSD benchmark` · `flash drive quality test` · `disk benchmark CLI` · `CrystalDiskMark alternative` · `AS SSD alternative` · `Rust disk benchmark` · `direct I/O benchmark` · `Windows storage benchmark` · `macOS storage benchmark` · `U盘跑分` · `U盘速度测试` · `U盘质量检测` · `U盘真假` · `扩容盘检测` · `假U盘识别` · `移动固态测速` · `4K随机读取` · `行业标准跑分` · `开源跑分工具`
