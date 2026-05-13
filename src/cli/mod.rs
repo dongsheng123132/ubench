@@ -88,6 +88,9 @@ enum Commands {
         /// 输出 JSON 报告文件路径 (含签名,可上传至 udiskbench.org)
         #[arg(long)]
         out: Option<String>,
+        /// 导出 HTML 跑分报告（含可视化图表，适合截图分享）
+        #[arg(long)]
+        export_html: Option<String>,
     },
 }
 
@@ -157,7 +160,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             ReportAction::Export { id, html } => cmd_report_export(mode, &cli.db, &id, &html),
             ReportAction::Delete { id } => cmd_report_delete(mode, &cli.db, &id),
         },
-        Commands::Bench { mount, quick, full, asssd, out } => {
+        Commands::Bench { mount, quick, full, asssd, out, export_html } => {
             let mode_count = (quick as u8) + (full as u8) + (asssd as u8);
             if mode_count > 1 {
                 return Err("--quick / --full / --asssd 只能三选一".into());
@@ -169,7 +172,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 crate::bench::BenchProfile::Quick // default
             };
-            cmd_bench(mode, &mount, profile, out.as_deref()).await
+            cmd_bench(mode, &mount, profile, out.as_deref(), export_html.as_deref()).await
         }
     }
 }
@@ -748,6 +751,7 @@ async fn cmd_bench(
     mount: &str,
     profile: crate::bench::BenchProfile,
     out_path: Option<&str>,
+    html_path: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::bench;
 
@@ -818,13 +822,24 @@ async fn cmd_bench(
         print_bench_human(&report);
     }
 
-    // Save to file if requested
+    // Save JSON report if requested
     if let Some(path) = out_path {
         std::fs::write(path, serde_json::to_string_pretty(&report)?)?;
         if mode == OutputMode::Human {
             println!();
-            println!("  💾 报告已保存: {}", path);
-            println!("     (含 SHA256 签名,任何人可验证)");
+            println!("  报告已保存: {}", path);
+            println!("  (含 SHA256 签名,任何人可验证)");
+        }
+    }
+
+    // Export HTML report if requested
+    if let Some(path) = html_path {
+        let html = crate::report::html::generate_bench_html(&report);
+        std::fs::write(path, &html)?;
+        if mode == OutputMode::Human {
+            println!();
+            println!("  HTML 报告已保存: {}", path);
+            println!("  (打开即可分享截图)");
         }
     }
 
