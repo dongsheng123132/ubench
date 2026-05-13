@@ -104,6 +104,12 @@ fn target_for(test_id: TestId) -> Target {
         TestId::Rnd4kRead  => Target { target: 15000.0, floor: 30.0, weight_pct: 35.0 },
         TestId::Sustained60sWrite => Target { target: 500.0, floor: 2.0, weight_pct: 10.0 },
         TestId::ColdStartRead     => Target { target: 5000.0, floor: 30.0, weight_pct: 5.0 },
+        // 4K-64Thrd: USB rarely benefits from queue depth (no NCQ on most controllers),
+        // so weight is small. SSDs with UASP can show real gains here.
+        TestId::Rnd4k64thWrite => Target { target: 50000.0, floor: 50.0, weight_pct: 0.0 },
+        TestId::Rnd4k64thRead  => Target { target: 80000.0, floor: 100.0, weight_pct: 0.0 },
+        // U-Claw small files: separate UCS metric, not part of UBS aggregate.
+        TestId::UClawSmallFiles => Target { target: 1.0, floor: 0.001, weight_pct: 0.0 },
     }
 }
 

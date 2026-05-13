@@ -11,6 +11,8 @@ pub enum BenchProfile {
     Quick,
     /// 10 minutes — full standard benchmark (recommended for scoring)
     Full,
+    /// AS SSD compatibility — 4 tests matching AS SSD Benchmark layout (Seq + 4K + 4K-64Thrd + AccTime)
+    AsSsdCompat,
 }
 
 impl BenchProfile {
@@ -18,6 +20,7 @@ impl BenchProfile {
         match self {
             BenchProfile::Quick => "quick",
             BenchProfile::Full => "full",
+            BenchProfile::AsSsdCompat => "asssd",
         }
     }
 
@@ -25,6 +28,7 @@ impl BenchProfile {
         match s.to_ascii_lowercase().as_str() {
             "quick" | "q" => Some(BenchProfile::Quick),
             "full" | "f" => Some(BenchProfile::Full),
+            "asssd" | "as-ssd" | "as_ssd" => Some(BenchProfile::AsSsdCompat),
             _ => None,
         }
     }
@@ -33,6 +37,7 @@ impl BenchProfile {
         match self {
             BenchProfile::Quick => QUICK_TESTS,
             BenchProfile::Full => FULL_TESTS,
+            BenchProfile::AsSsdCompat => AS_SSD_TESTS,
         }
     }
 }
@@ -55,6 +60,9 @@ pub struct TestSpec {
     /// How many times to run; the median of the last (n-1) runs is reported
     /// (the first run is always discarded as warmup).
     pub repeat: u32,
+    /// Number of parallel worker threads (1 = single-threaded).
+    /// AS SSD's "4K-64 Thrd" uses 64. Set to 1 for AS SSD's plain "4K".
+    pub threads: u32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -63,8 +71,14 @@ pub enum TestId {
     Seq1mWrite,
     Rnd4kRead,
     Rnd4kWrite,
+    /// AS SSD compatibility: 4K random read with 64 worker threads
+    Rnd4k64thRead,
+    /// AS SSD compatibility: 4K random write with 64 worker threads
+    Rnd4k64thWrite,
     Sustained60sWrite,
     ColdStartRead,
+    /// U-Claw realistic workload: open + read N small files, report seconds
+    UClawSmallFiles,
 }
 
 impl TestId {
@@ -74,8 +88,11 @@ impl TestId {
             TestId::Seq1mWrite => "SEQ1M_WRITE",
             TestId::Rnd4kRead => "RND4K_READ",
             TestId::Rnd4kWrite => "RND4K_WRITE",
+            TestId::Rnd4k64thRead => "RND4K_64TH_READ",
+            TestId::Rnd4k64thWrite => "RND4K_64TH_WRITE",
             TestId::Sustained60sWrite => "SUSTAINED_60S_WRITE",
             TestId::ColdStartRead => "COLD_START_READ",
+            TestId::UClawSmallFiles => "UCLAW_SMALL_FILES",
         }
     }
 }
@@ -95,110 +112,111 @@ pub enum Op {
 const MB: u64 = 1024 * 1024;
 
 /// Quick profile (~60 seconds).
-/// Smaller working set, fewer repeats, no sustained / cold-start.
 const QUICK_TESTS: &[TestSpec] = &[
     TestSpec {
-        id: TestId::Seq1mWrite,
-        label: "SEQ1M Q1T1 Write",
-        block_size: 1 * 1024 * 1024,
-        access: AccessPattern::Sequential,
-        op: Op::Write,
-        working_set: 256 * MB,
-        duration_secs: 5,
-        repeat: 3,
+        id: TestId::Seq1mWrite, label: "SEQ1M Q1T1 Write",
+        block_size: 1024 * 1024, access: AccessPattern::Sequential, op: Op::Write,
+        working_set: 256 * MB, duration_secs: 5, repeat: 3, threads: 1,
     },
     TestSpec {
-        id: TestId::Seq1mRead,
-        label: "SEQ1M Q1T1 Read",
-        block_size: 1 * 1024 * 1024,
-        access: AccessPattern::Sequential,
-        op: Op::Read,
-        working_set: 256 * MB,
-        duration_secs: 5,
-        repeat: 3,
+        id: TestId::Seq1mRead, label: "SEQ1M Q1T1 Read",
+        block_size: 1024 * 1024, access: AccessPattern::Sequential, op: Op::Read,
+        working_set: 256 * MB, duration_secs: 5, repeat: 3, threads: 1,
     },
     TestSpec {
-        id: TestId::Rnd4kWrite,
-        label: "RND4K Q1T1 Write",
-        block_size: 4 * 1024,
-        access: AccessPattern::Random,
-        op: Op::Write,
-        working_set: 256 * MB,
-        duration_secs: 5,
-        repeat: 3,
+        id: TestId::Rnd4kWrite, label: "RND4K Q1T1 Write",
+        block_size: 4096, access: AccessPattern::Random, op: Op::Write,
+        working_set: 256 * MB, duration_secs: 5, repeat: 3, threads: 1,
     },
     TestSpec {
-        id: TestId::Rnd4kRead,
-        label: "RND4K Q1T1 Read",
-        block_size: 4 * 1024,
-        access: AccessPattern::Random,
-        op: Op::Read,
-        working_set: 256 * MB,
-        duration_secs: 5,
-        repeat: 3,
+        id: TestId::Rnd4kRead, label: "RND4K Q1T1 Read",
+        block_size: 4096, access: AccessPattern::Random, op: Op::Read,
+        working_set: 256 * MB, duration_secs: 5, repeat: 3, threads: 1,
     },
 ];
 
-/// Full profile (~10 minutes). 5x repeats, larger working set, adds sustained + cold-start.
+/// Full profile (~10 minutes). Adds 64-thread tests (AS SSD compat),
+/// 60s sustained write, cold-start latency, and U-Claw small-file probe.
 const FULL_TESTS: &[TestSpec] = &[
     TestSpec {
-        id: TestId::Seq1mWrite,
-        label: "SEQ1M Q1T1 Write",
-        block_size: 1 * 1024 * 1024,
-        access: AccessPattern::Sequential,
-        op: Op::Write,
-        working_set: 1024 * MB,
-        duration_secs: 5,
-        repeat: 5,
+        id: TestId::Seq1mWrite, label: "SEQ1M Q1T1 Write",
+        block_size: 1024 * 1024, access: AccessPattern::Sequential, op: Op::Write,
+        working_set: 1024 * MB, duration_secs: 5, repeat: 5, threads: 1,
     },
     TestSpec {
-        id: TestId::Seq1mRead,
-        label: "SEQ1M Q1T1 Read",
-        block_size: 1 * 1024 * 1024,
-        access: AccessPattern::Sequential,
-        op: Op::Read,
-        working_set: 1024 * MB,
-        duration_secs: 5,
-        repeat: 5,
+        id: TestId::Seq1mRead, label: "SEQ1M Q1T1 Read",
+        block_size: 1024 * 1024, access: AccessPattern::Sequential, op: Op::Read,
+        working_set: 1024 * MB, duration_secs: 5, repeat: 5, threads: 1,
     },
     TestSpec {
-        id: TestId::Rnd4kWrite,
-        label: "RND4K Q1T1 Write",
-        block_size: 4 * 1024,
-        access: AccessPattern::Random,
-        op: Op::Write,
-        working_set: 1024 * MB,
-        duration_secs: 5,
-        repeat: 5,
+        id: TestId::Rnd4kWrite, label: "RND4K Q1T1 Write",
+        block_size: 4096, access: AccessPattern::Random, op: Op::Write,
+        working_set: 1024 * MB, duration_secs: 5, repeat: 5, threads: 1,
     },
     TestSpec {
-        id: TestId::Rnd4kRead,
-        label: "RND4K Q1T1 Read",
-        block_size: 4 * 1024,
-        access: AccessPattern::Random,
-        op: Op::Read,
-        working_set: 1024 * MB,
-        duration_secs: 5,
-        repeat: 5,
+        id: TestId::Rnd4kRead, label: "RND4K Q1T1 Read",
+        block_size: 4096, access: AccessPattern::Random, op: Op::Read,
+        working_set: 1024 * MB, duration_secs: 5, repeat: 5, threads: 1,
     },
     TestSpec {
-        id: TestId::Sustained60sWrite,
-        label: "Sustained 60s Write (SLC cache exhaustion)",
-        block_size: 1 * 1024 * 1024,
-        access: AccessPattern::Sequential,
-        op: Op::Write,
-        working_set: 8 * 1024 * MB, // up to 8 GiB or whatever fits
-        duration_secs: 60,
-        repeat: 1,
+        id: TestId::Rnd4k64thWrite, label: "RND4K-64Thrd Write (AS SSD compat)",
+        block_size: 4096, access: AccessPattern::Random, op: Op::Write,
+        working_set: 1024 * MB, duration_secs: 10, repeat: 3, threads: 64,
     },
     TestSpec {
-        id: TestId::ColdStartRead,
-        label: "Cold-start First-byte Read Latency",
-        block_size: 4 * 1024,
-        access: AccessPattern::Random,
-        op: Op::Read,
-        working_set: 16 * MB, // small probe
-        duration_secs: 1,
-        repeat: 3,
+        id: TestId::Rnd4k64thRead, label: "RND4K-64Thrd Read (AS SSD compat)",
+        block_size: 4096, access: AccessPattern::Random, op: Op::Read,
+        working_set: 1024 * MB, duration_secs: 10, repeat: 3, threads: 64,
+    },
+    TestSpec {
+        id: TestId::Sustained60sWrite, label: "Sustained 60s Write (SLC cache exhaustion)",
+        block_size: 1024 * 1024, access: AccessPattern::Sequential, op: Op::Write,
+        working_set: 8 * 1024 * MB, duration_secs: 60, repeat: 1, threads: 1,
+    },
+    TestSpec {
+        id: TestId::ColdStartRead, label: "Cold-start First-byte Read Latency",
+        block_size: 4096, access: AccessPattern::Random, op: Op::Read,
+        working_set: 16 * MB, duration_secs: 1, repeat: 3, threads: 1,
+    },
+    TestSpec {
+        id: TestId::UClawSmallFiles, label: "U-Claw Small-Files Real Workload",
+        block_size: 4096, access: AccessPattern::Random, op: Op::Read,
+        working_set: 64 * MB, duration_secs: 30, repeat: 1, threads: 1,
+    },
+];
+
+/// AS SSD Benchmark compatibility profile.
+/// Matches AS SSD's 4 tests so users can directly compare with merchant screenshots.
+/// Note: AS SSD reports as MB/s; UBench also reports MB/s for these (rate * block_size).
+const AS_SSD_TESTS: &[TestSpec] = &[
+    TestSpec {
+        id: TestId::Seq1mWrite, label: "Seq Write (AS SSD)",
+        block_size: 1024 * 1024, access: AccessPattern::Sequential, op: Op::Write,
+        working_set: 1024 * MB, duration_secs: 10, repeat: 3, threads: 1,
+    },
+    TestSpec {
+        id: TestId::Seq1mRead, label: "Seq Read (AS SSD)",
+        block_size: 1024 * 1024, access: AccessPattern::Sequential, op: Op::Read,
+        working_set: 1024 * MB, duration_secs: 10, repeat: 3, threads: 1,
+    },
+    TestSpec {
+        id: TestId::Rnd4kWrite, label: "4K Write (AS SSD)",
+        block_size: 4096, access: AccessPattern::Random, op: Op::Write,
+        working_set: 1024 * MB, duration_secs: 10, repeat: 3, threads: 1,
+    },
+    TestSpec {
+        id: TestId::Rnd4kRead, label: "4K Read (AS SSD)",
+        block_size: 4096, access: AccessPattern::Random, op: Op::Read,
+        working_set: 1024 * MB, duration_secs: 10, repeat: 3, threads: 1,
+    },
+    TestSpec {
+        id: TestId::Rnd4k64thWrite, label: "4K-64Thrd Write (AS SSD)",
+        block_size: 4096, access: AccessPattern::Random, op: Op::Write,
+        working_set: 1024 * MB, duration_secs: 10, repeat: 3, threads: 64,
+    },
+    TestSpec {
+        id: TestId::Rnd4k64thRead, label: "4K-64Thrd Read (AS SSD)",
+        block_size: 4096, access: AccessPattern::Random, op: Op::Read,
+        working_set: 1024 * MB, duration_secs: 10, repeat: 3, threads: 64,
     },
 ];

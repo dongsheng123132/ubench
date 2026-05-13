@@ -79,9 +79,12 @@ enum Commands {
         /// 快速模式 (~1 分钟,4 项核心测试)
         #[arg(long)]
         quick: bool,
-        /// 完整模式 (~10 分钟,6 项含 SLC 缓存衰减 + 冷启动)
+        /// 完整模式 (~10 分钟,8 项含 4K-64Thrd / SLC 缓存衰减 / 冷启动 / U-Claw 实景)
         #[arg(long)]
         full: bool,
+        /// AS SSD Benchmark 兼容模式 (~3 分钟,6 项与 AS SSD 完全对齐,可直接对比商家截图)
+        #[arg(long)]
+        asssd: bool,
         /// 输出 JSON 报告文件路径 (含签名,可上传至 udiskbench.org)
         #[arg(long)]
         out: Option<String>,
@@ -154,12 +157,17 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             ReportAction::Export { id, html } => cmd_report_export(mode, &cli.db, &id, &html),
             ReportAction::Delete { id } => cmd_report_delete(mode, &cli.db, &id),
         },
-        Commands::Bench { mount, quick, full, out } => {
-            let profile = match (quick, full) {
-                (true, false) => crate::bench::BenchProfile::Quick,
-                (false, true) => crate::bench::BenchProfile::Full,
-                (false, false) => crate::bench::BenchProfile::Quick, // default
-                (true, true) => return Err("不能同时指定 --quick 和 --full".into()),
+        Commands::Bench { mount, quick, full, asssd, out } => {
+            let mode_count = (quick as u8) + (full as u8) + (asssd as u8);
+            if mode_count > 1 {
+                return Err("--quick / --full / --asssd 只能三选一".into());
+            }
+            let profile = if full {
+                crate::bench::BenchProfile::Full
+            } else if asssd {
+                crate::bench::BenchProfile::AsSsdCompat
+            } else {
+                crate::bench::BenchProfile::Quick // default
             };
             cmd_bench(mode, &mount, profile, out.as_deref()).await
         }
