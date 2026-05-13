@@ -48,6 +48,69 @@ pub struct InterfaceInfo {
     pub usb_version: Option<String>,
     /// Negotiated link speed in MB/s (best-effort)
     pub link_speed_mbps: Option<u32>,
+    /// Device classification (USB flash drive / portable SSD / NVMe SSD / SATA SSD / HDD / Unknown).
+    /// Used only as a label on reports — scoring formula stays the same across device types
+    /// (so a 86 USB-stick and a 86 NVMe-SSD are equally good *for their cost class*).
+    pub device_class: DeviceClass,
+    /// Hardware model string (e.g. "Samsung MZAL4512HBLU-00BL2", "VendorC ProductCode")
+    pub model: String,
+    /// Media type from OS (SSD / HDD / Unspecified)
+    pub media_type: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum DeviceClass {
+    /// Plain USB stick (USB bus + no SSD media)
+    UsbFlashDrive,
+    /// Portable SSD in USB enclosure (USB bus + SSD media, often with UASP)
+    PortableSsd,
+    /// USB-attached spinning hard disk
+    UsbHardDisk,
+    /// Internal NVMe SSD (NVMe bus)
+    NvmeSsd,
+    /// Internal SATA SSD (SATA bus + SSD media)
+    SataSsd,
+    /// Internal SATA hard disk (SATA bus + HDD media)
+    HardDisk,
+    /// Cannot determine from OS metadata
+    Unknown,
+}
+
+impl DeviceClass {
+    pub fn label(self) -> &'static str {
+        match self {
+            DeviceClass::UsbFlashDrive => "USB Flash Drive (U盘)",
+            DeviceClass::PortableSsd   => "Portable SSD (移动固态)",
+            DeviceClass::UsbHardDisk   => "USB Hard Disk (USB 移动硬盘)",
+            DeviceClass::NvmeSsd       => "NVMe SSD",
+            DeviceClass::SataSsd       => "SATA SSD",
+            DeviceClass::HardDisk      => "Hard Disk Drive (机械硬盘)",
+            DeviceClass::Unknown       => "Unknown",
+        }
+    }
+    /// Classify based on bus type + media type + heuristics.
+    /// `bus`: "USB" / "NVMe" / "SATA" / "SCSI" / etc.
+    /// `media`: "SSD" / "HDD" / "Unspecified" / ""
+    /// `spindle_rpm`: 0 for SSD, >0 for HDD (sometimes only this distinguishes)
+    pub fn classify(bus: &str, media: &str, spindle_rpm: u32) -> Self {
+        let bus_u = bus.to_ascii_uppercase();
+        let media_u = media.to_ascii_uppercase();
+        match (bus_u.as_str(), media_u.as_str()) {
+            ("USB", "SSD") => DeviceClass::PortableSsd,
+            ("USB", "HDD") => DeviceClass::UsbHardDisk,
+            ("USB", _) => {
+                // Most USB sticks report "Unspecified". If there's a spindle, it's a USB HDD.
+                if spindle_rpm > 0 { DeviceClass::UsbHardDisk } else { DeviceClass::UsbFlashDrive }
+            }
+            ("NVME", _) => DeviceClass::NvmeSsd,
+            ("SATA", "SSD") => DeviceClass::SataSsd,
+            ("SATA", "HDD") => DeviceClass::HardDisk,
+            ("SATA", _) => {
+                if spindle_rpm > 0 { DeviceClass::HardDisk } else { DeviceClass::SataSsd }
+            }
+            _ => DeviceClass::Unknown,
+        }
+    }
 }
 
 impl BenchReport {

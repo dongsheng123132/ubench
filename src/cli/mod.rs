@@ -872,13 +872,8 @@ fn normalize_mount(s: &str) -> String {
         .to_uppercase()
 }
 
-fn collect_interface_info(_mount: &str) -> crate::bench::report::InterfaceInfo {
-    // TODO: detect actual USB version via WMI/ioctl. For v1.0-alpha, leave best-effort.
-    crate::bench::report::InterfaceInfo {
-        bus_type: "Unknown".to_string(),
-        usb_version: None,
-        link_speed_mbps: None,
-    }
+fn collect_interface_info(mount: &str) -> crate::bench::report::InterfaceInfo {
+    crate::disk::device_info::detect_for_mount(mount)
 }
 
 fn print_bench_human(report: &crate::bench::BenchReport) {
@@ -894,6 +889,10 @@ fn print_bench_human(report: &crate::bench::BenchReport) {
     if !report.drive.file_system.is_empty() {
         println!("│  文件系统: {}", report.drive.file_system);
     }
+    if !report.interface.model.is_empty() {
+        println!("│  型号  : {}", report.interface.model);
+    }
+    println!("│  类型  : {}", report.interface.device_class.label());
     println!("│  接口  : {} {}", report.interface.bus_type,
         report.interface.usb_version.as_deref().unwrap_or(""));
     println!("└──────────────────────────────────────────────────────────────");
