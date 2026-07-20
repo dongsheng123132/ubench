@@ -9,6 +9,10 @@
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)]()
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange)](https://www.rust-lang.org/)
 
+<p align="center">
+  <img src="docs/ubench-demo.png" alt="UBench 真实跑分输出 — 绕过 OS 缓存的 Direct I/O 测速，实测 NVMe SSD 顺序读 2143 MB/s、UBench Score 95/100 A 级" width="640">
+</p>
+
 > **Keywords**: USB benchmark · USB speed test · CrystalDiskMark alternative · AS SSD Benchmark · fake USB detection · portable SSD test · 4K random IOPS · Direct I/O · NO_BUFFERING · U盘跑分 · U盘测速 · 假U盘检测 · 扩容盘识别 · 移动固态测试 · 行业标准
 
 ---
